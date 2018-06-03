@@ -1,5 +1,5 @@
 # SolrSynchronizedDisruption
-Work done for Solr SynchronizedDisruption.  This will invoke a garbage collection via JMX on a Solr instance, while Solr is being queried.  This is cause queries executing to had a longer elapsed time.
+Work done for Solr SynchronizedDisruption.  This will invoke a garbage collection via JMX on a Solr instance, while Solr is being queried.  This is cause queries executing to have a longer elapsed time.
 
 # bin/startSolrForDemo.sh
 This will take an argument of the Solr install directory, enable JMX then create a 2 node SolrCloud example cluster, with a collection "gettingstarted" that has 2 shards and a replication factor of 1.
