@@ -17,6 +17,7 @@ import javax.management.remote.JMXServiceURL;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.IntStream;
 
 import static java.lang.Thread.interrupted;
 
@@ -26,7 +27,7 @@ public class QueryCauseGC {
     private static final String[] wordLib = new String[]{"The", "Word", "Is", "stop", "Bigword", "Solr", "Lucene", "wordly", "burn", "alter"};
     private static final int wordLibArrayLength = wordLib.length - 1;
 
-    private static final List<Event> eventList = new ArrayList<>();
+    private static final List<Event> eventList = Collections.synchronizedList(new ArrayList<>());
 
     private static final String COLLECTIONS_OPT = "collection";
     private static final String COLLECTION_DEFAULT = "gettingstarted";
@@ -45,6 +46,12 @@ public class QueryCauseGC {
 
     private static final String GC_EVENT_DEFAULT = "GC Invoked";
     private static final String GC_EVENT_OPT = "gceventname";
+
+    private static final String INDEX_THREAD_COUNT_OPT = "indexthreadcount";
+    private static final String INDEX_THREAD_COUNT_DEFAULT = "2";
+
+    private static final String QUERY_THREAD_COUNT_OPT = "querythreadcount";
+    private static final String QUERY_THREAD_COUNT_DEFAULT = "1";
 
     public static void main(String[] args) {
 
@@ -67,6 +74,8 @@ public class QueryCauseGC {
         String chRoot = cmd.getOptionValue(CH_ROOT_OPT, CH_ROOT_DEFAULT);
         String queryEventName = cmd.getOptionValue(QUERY_EVENT_OPT, QUERY_EVENT_DEFAULT);
         String gcEventName = cmd.getOptionValue(GC_EVENT_OPT, GC_EVENT_DEFAULT);
+        int indexThreadCount = Integer.parseInt(cmd.getOptionValue(INDEX_THREAD_COUNT_OPT, INDEX_THREAD_COUNT_DEFAULT));
+        int queryThreadCount = Integer.parseInt(cmd.getOptionValue(QUERY_THREAD_COUNT_OPT, QUERY_THREAD_COUNT_DEFAULT));
         String zkHosts = cmd.getOptionValue(ZK_HOSTS_OPT, ZK_HOSTS_DEFAULT);
         String[] zkHostsArray = zkHosts.split(",");
 
@@ -86,9 +95,12 @@ public class QueryCauseGC {
                     }
                 }
             });
-            Thread tIndex2 = new Thread(tIndex);
-            tIndex.start();
-            tIndex2.start();
+            List<Thread> indexThreads = new ArrayList<>(indexThreadCount);
+            IntStream.of(indexThreadCount).forEach(i -> {
+                Thread tIndexRunning = new Thread(tIndex);
+                tIndexRunning.start();
+                indexThreads.add(tIndexRunning);
+            });
 
             Thread tQuery = new Thread(() -> {
                 while (!interrupted()) {
@@ -102,7 +114,12 @@ public class QueryCauseGC {
                 }
             });
 
-            tQuery.start();
+            List<Thread> queryThreads = new ArrayList<>(queryThreadCount);
+            IntStream.of(queryThreadCount).forEach(i -> {
+                Thread queryThread = new Thread(tQuery);
+                tQuery.start();
+                queryThreads.add(queryThread);
+            });
 
             // Sleep to let Solr warm up with the queries
             Thread.sleep(10000);
@@ -127,19 +144,23 @@ public class QueryCauseGC {
             tJMXGC.join();
 
             Thread.sleep(1000);
-            tIndex.interrupt();
-            tIndex2.interrupt();
-            tQuery.interrupt();
+            indexThreads.forEach(Thread::interrupt);
+            queryThreads.forEach(Thread::interrupt);
 
-            tIndex.join();
-            tIndex2.join();
-            tQuery.join();
+            for (Thread indexThread : indexThreads) {
+                indexThread.join();
+            }
+            for (Thread indexThread : indexThreads) {
+                indexThread.join();
+            }
 
             Collections.sort(eventList);
 
+            StringBuilder stringBuilder = new StringBuilder(System.lineSeparator());
             for (Event e : eventList) {
-                System.out.println(e.toString());
+                stringBuilder.append(e.toString()).append(System.lineSeparator());
             }
+            System.out.println(stringBuilder.toString());
             cloudSolrClient.commit(collection);
         } catch (Exception e) {
             e.printStackTrace();
@@ -189,6 +210,8 @@ public class QueryCauseGC {
         options.addOption(CH_ROOT_OPT, CH_ROOT_OPT,true, "Chroot of Solr in Zookeeper");
         options.addOption(GC_EVENT_OPT, GC_EVENT_OPT,true, "");
         options.addOption(QUERY_EVENT_OPT, QUERY_EVENT_OPT,true, "");
+        options.addOption(QUERY_THREAD_COUNT_OPT, QUERY_THREAD_COUNT_OPT,true, "Number of Threads to Run Querying on");
+        options.addOption(INDEX_THREAD_COUNT_OPT, INDEX_THREAD_COUNT_OPT,true, "Number of Threads to Run Indexing on");
 
         return options;
     }
