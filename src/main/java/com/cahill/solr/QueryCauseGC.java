@@ -19,8 +19,6 @@ import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.IntStream;
 
-import static java.lang.Thread.interrupted;
-
 public class QueryCauseGC {
     private static final Logger logger = LoggerFactory.getLogger(QueryCauseGC.class);
 
@@ -66,6 +64,7 @@ public class QueryCauseGC {
 
         QueryCauseGC queryCauseGC = new QueryCauseGC();
         queryCauseGC.run(cmd);
+        System.exit(0);
     }
 
     private void run(CommandLine cmd) {
@@ -85,14 +84,15 @@ public class QueryCauseGC {
             cloudSolrClient.connect();
 
             Thread tIndex = new Thread(() -> {
-                while (!interrupted()) {
-                    try {
+//                while (!interrupted()) {
+                try {
+                    while (!Thread.currentThread().isInterrupted()) {
                         addData(cloudSolrClient, collection);
                         Thread.sleep(10);
-                    } catch (InterruptedException e) {
-                        logger.info("InterruptedException", e);
-                        return;
                     }
+                } catch (InterruptedException e) {
+                    logger.info("InterruptedException", e);
+                    return;
                 }
             });
             List<Thread> indexThreads = new ArrayList<>(indexThreadCount);
@@ -103,14 +103,15 @@ public class QueryCauseGC {
             });
 
             Thread tQuery = new Thread(() -> {
-                while (!interrupted()) {
-                    try {
+//                while (!interrupted()) {
+                try {
+                    while (!Thread.currentThread().isInterrupted()) {
                         query(cloudSolrClient, collection, queryEventName);
                         Thread.sleep(10);
-                    } catch (Exception e) {
-                        logger.info("Exception", e);
-                        return;
                     }
+                } catch (Exception e) {
+                    logger.info("Exception", e);
+                    return;
                 }
             });
 
@@ -150,8 +151,8 @@ public class QueryCauseGC {
             for (Thread indexThread : indexThreads) {
                 indexThread.join();
             }
-            for (Thread indexThread : indexThreads) {
-                indexThread.join();
+            for (Thread queryThread : queryThreads) {
+                queryThread.join();
             }
 
             Collections.sort(eventList);
@@ -162,6 +163,7 @@ public class QueryCauseGC {
             }
             System.out.println(stringBuilder.toString());
             cloudSolrClient.commit(collection);
+            cloudSolrClient.close();
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -179,7 +181,8 @@ public class QueryCauseGC {
                 "  y : \"unique(myNumeric_i)\"" +
                 "}");
         long start = System.currentTimeMillis();
-        QueryResponse response = cloudSolrClient.query(collection, query);
+        QueryResponse response;
+        response = cloudSolrClient.query(collection, query);
         String event = preQueryLog + "  QTime: " + response.getQTime() + ", Elapsed Time: " + response.getElapsedTime();
         eventList.add(new Event(start, System.currentTimeMillis(), event));
     }
@@ -195,7 +198,7 @@ public class QueryCauseGC {
             }
             sid.setField("mytext_t", randText.toString().trim());
             sid.setField("myNumeric_i", randomNum);
-            cloudSolrClient.add(collection,sid);
+            cloudSolrClient.add(collection, sid);
         } catch (Exception e) {
             e.printStackTrace();
         }
